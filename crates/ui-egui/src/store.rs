@@ -45,7 +45,7 @@ impl LauncherUi {
                 if bar == TitleBar::Custom {
                     widgets::window_buttons(ui, crate::views::HEADER_H);
                 }
-                if widgets::nav_icon(ui, "⚙", tl!("Settings"), 40.0, false).clicked() {
+                if widgets::nav_icon(ui, widgets::Glyph::Settings, tl!("Settings"), 40.0, false).clicked() {
                     self.dialog = Some(Dialog::Settings);
                 }
                 let width = (ui.available_width() - 24.0).clamp(40.0, 600.0);
@@ -54,9 +54,12 @@ impl LauncherUi {
                 ui.add_space((available.right() - center - width * 0.5).max(0.0));
                 let response = ui.add_sized(
                     vec2(width, 36.0),
-                    egui::TextEdit::singleline(&mut self.search).hint_text(tl!("Search apps")).vertical_align(Align::Center).margin(vec2(14.0, 8.0)),
+                    egui::TextEdit::singleline(&mut self.search)
+                        .hint_text(tl!("Search apps"))
+                        .align(egui::Align2::LEFT_CENTER)
+                        .margin(vec2(14.0, 8.0)),
                 );
-                response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, tl!("Search apps")));
+                response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, tl!("Search apps")));
                 if response.changed() {
                     self.detail = None;
                     self.detail_shown = None;
@@ -210,7 +213,7 @@ impl LauncherUi {
                             ui.label(RichText::new("→").size(24.0).color(t.accent_ink));
                         });
                         if ui
-                            .interact(response.response.rect, ui.id().with(action as u8), Sense::click())
+                            .interact(response.response.rect, ui.scope_id().with(action as u8), Sense::click())
                             .on_hover_cursor(egui::CursorIcon::PointingHand)
                             .clicked()
                         {
@@ -275,6 +278,6 @@ fn navigation_button(ui: &mut Ui, page: Page, selected: bool) -> bool {
         }
     }
     paint.text(pos2(rect.center().x, rect.bottom() - 16.0), egui::Align2::CENTER_CENTER, page.label(), FontId::proportional(10.5), color);
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, page.label()));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, page.label()));
     response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }

@@ -11,10 +11,13 @@ permissions:
 
 concurrency:
   group: sonarcloud-${{ github.ref }}
-  cancel-in-progress: true
+  # A push to main is the run that publishes coverage; superseded runs there would never finish.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   sonarcloud:
+    # The upstream analysis belongs to storytold; the fork runs its own CI checks.
+    if: github.repository == 'storytold/craft-launcher'
     # Tracked at @main so org-wide CI improvements propagate without PR churn.
     uses: storytold/craft-common-actions/.github/workflows/sonarcloud.yml@main
     secrets: inherit

@@ -118,13 +118,15 @@ pub struct Settings {
     pub last_check: Option<i64>,
     /// Catalog ids of apps hidden from the main lists (`photocraft`, …).
     pub hidden: std::collections::BTreeSet<String>,
+    /// The one-time notice that closing the window keeps the launcher in the tray has been shown.
+    pub tray_hint_shown: bool,
     /// How many times each app was opened from the launcher (catalog id → count), for "Frequently used".
     pub launches: BTreeMap<String, u32>,
 }
 
 impl Settings {
     /// Machine-readable code for "follow the system language".
-    pub const LANGUAGE_AUTO: &'static str = "auto";
+    pub const LANGUAGE_AUTO: &str = "auto";
 
     /// Clear saved catalog filters whose controls were removed from the toolbar.
     pub fn migrate(&mut self) {
@@ -200,6 +202,7 @@ impl Default for Settings {
             notified: BTreeMap::new(),
             last_check: None,
             hidden: std::collections::BTreeSet::new(),
+            tray_hint_shown: false,
             launches: BTreeMap::new(),
         }
     }

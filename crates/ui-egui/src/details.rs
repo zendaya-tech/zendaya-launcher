@@ -8,6 +8,7 @@ use std::sync::Arc;
 use artcraft_launcher_core::details::AppDetails;
 use artcraft_launcher_core::platform::pick_asset;
 use artcraft_launcher_core::protocol::Command;
+use artcraft_launcher_core::status::AppStatus;
 use egui::{Color32, CornerRadius, Id, Margin, Order, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 
 use crate::app::LauncherUi;
@@ -61,7 +62,7 @@ impl LauncherUi {
             }
         }
         if missing {
-            self.send(Command::FetchScreenshots { app: details.id.to_string() });
+            self.act_command(Command::FetchScreenshots { app: details.id.to_string() });
         }
     }
 
@@ -96,6 +97,7 @@ impl LauncherUi {
             self.detail_zoom = false;
             self.request_pictures(&id);
         }
+
         let Some(details) = AppDetails::by_id(&id) else {
             self.detail = None;
             return;
@@ -106,78 +108,84 @@ impl LauncherUi {
         let t = Tokens::get(&ctx);
         let wide = ui.available_width() >= theme::PAGE_COLUMNS_FROM;
         let (previous, next) = self.neighbour_apps(&id);
+        let page_visuals = crate::sheet::accent_scroll(ui, &t, t.app_ink(entry.app));
         egui::ScrollArea::vertical().id_salt(("details-scroll", id)).auto_shrink([false, false]).show(ui, |ui| {
-            ui.set_width(ui.available_width());
+            *ui.visuals_mut() = page_visuals;
             self.details_hero(ui, &entry, details, &t, (previous.as_deref(), next.as_deref()), wide);
-            egui::Frame::new().inner_margin(Margin::same(PAD as i8)).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                let app_color = rgb(entry.app.color);
-                if wide && details.shots.is_empty() {
-                    // No pictures to fill the left side: the story and features share it, and the
-                    // release facts take the right, so neither side is left empty.
-                    let gap = theme::COLUMN_GAP;
-                    let total = ui.available_width();
-                    let left_w = ((total - gap) * 0.58).floor();
-                    let right_w = total - gap - left_w;
-                    ui.horizontal_top(|ui| {
-                        ui.spacing_mut().item_spacing.x = gap;
-                        ui.vertical(|ui| {
-                            ui.set_width(left_w);
-                            ui.spacing_mut().item_spacing.y = 8.0;
-                            for p in details.paragraphs() {
-                                ui.add(egui::Label::new(RichText::new(p).size(14.5).color(t.ink)).wrap());
-                            }
-                            ui.add_space(14.0);
-                            features(ui, details, entry.app, &t);
-                        });
-                        ui.vertical(|ui| {
-                            ui.set_width(right_w);
-                            ui.spacing_mut().item_spacing.y = 8.0;
-                            self.release_section(ui, &entry, details, &t, 2);
-                        });
-                    });
-                } else if wide {
-                    let gap = theme::COLUMN_GAP;
-                    let total = ui.available_width();
-                    let left_w = ((total - gap) * 0.58).floor();
-                    let right_w = total - gap - left_w;
-                    ui.horizontal_top(|ui| {
-                        ui.spacing_mut().item_spacing.x = gap;
-                        ui.vertical(|ui| {
-                            ui.set_width(left_w);
-                            ui.spacing_mut().item_spacing.y = 8.0;
-                            self.gallery(ui, details, &t, app_color);
-                            ui.add_space(8.0);
-                            for p in details.paragraphs() {
-                                ui.add(egui::Label::new(RichText::new(p).size(14.5).color(t.ink)).wrap());
-                            }
-                        });
-                        ui.vertical(|ui| {
-                            ui.set_width(right_w);
-                            ui.spacing_mut().item_spacing.y = 8.0;
-                            features(ui, details, entry.app, &t);
-                        });
-                    });
-                    // The release gets the full width under both columns, so neither column
-                    // is left with an empty tail: its facts sit in one row of four.
-                    ui.add_space(22.0);
-                    ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top() - 11.0, t.hairline());
-                    self.release_section(ui, &entry, details, &t, 4);
-                } else {
-                    self.gallery(ui, details, &t, app_color);
-                    ui.add_space(8.0);
+            egui::Frame::new().inner_margin(Margin::same(PAD as i8)).show(ui, |ui| self.details_body(ui, &entry, details, wide, &t));
+        });
+        if self.detail_zoom && self.detail.is_some() {
+            self.lightbox(&ctx, details, &t);
+        }
+    }
+
+    /// The page below the hero: the story, pictures, features and release facts, in two columns
+    /// when the card is wide (release facts under both when there are pictures to make columns)
+    /// and stacked when it isn't.
+    fn details_body(&mut self, ui: &mut Ui, entry: &AppEntry, details: &AppDetails, wide: bool, t: &Tokens) {
+        ui.set_width(ui.available_width());
+        let app_color = rgb(entry.app.color);
+        if wide && details.shots.is_empty() {
+            // No pictures to fill the left side: the story and features share it, and the
+            // release facts take the right, so neither side is left empty.
+            let gap = theme::COLUMN_GAP;
+            let total = ui.available_width();
+            let left_w = ((total - gap) * 0.58).floor();
+            let right_w = total - gap - left_w;
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                ui.vertical(|ui| {
+                    ui.set_width(left_w);
+                    ui.spacing_mut().item_spacing.y = 8.0;
                     for p in details.paragraphs() {
                         ui.add(egui::Label::new(RichText::new(p).size(14.5).color(t.ink)).wrap());
                     }
                     ui.add_space(14.0);
-                    features(ui, details, entry.app, &t);
-                    ui.add_space(14.0);
-                    self.release_section(ui, &entry, details, &t, 2);
-                }
+                    features(ui, details, entry.app, t);
+                });
+                ui.vertical(|ui| {
+                    ui.set_width(right_w);
+                    ui.spacing_mut().item_spacing.y = 8.0;
+                    self.release_section(ui, entry, details, t, 2);
+                });
             });
-        });
-        if self.detail_zoom && self.detail.is_some() {
-            self.lightbox(&ctx, details, &t);
+        } else if wide {
+            let gap = theme::COLUMN_GAP;
+            let total = ui.available_width();
+            let left_w = ((total - gap) * 0.58).floor();
+            let right_w = total - gap - left_w;
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                ui.vertical(|ui| {
+                    ui.set_width(left_w);
+                    ui.spacing_mut().item_spacing.y = 8.0;
+                    self.gallery(ui, details, t, app_color);
+                    ui.add_space(8.0);
+                    for p in details.paragraphs() {
+                        ui.add(egui::Label::new(RichText::new(p).size(14.5).color(t.ink)).wrap());
+                    }
+                });
+                ui.vertical(|ui| {
+                    ui.set_width(right_w);
+                    ui.spacing_mut().item_spacing.y = 8.0;
+                    features(ui, details, entry.app, t);
+                });
+            });
+            // The release gets the full width under both columns, so neither column
+            // is left with an empty tail: its facts sit in one row of four.
+            ui.add_space(22.0);
+            ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top() - 11.0, t.hairline());
+            self.release_section(ui, entry, details, t, 4);
+        } else {
+            self.gallery(ui, details, t, app_color);
+            ui.add_space(8.0);
+            for p in details.paragraphs() {
+                ui.add(egui::Label::new(RichText::new(p).size(14.5).color(t.ink)).wrap());
+            }
+            ui.add_space(14.0);
+            features(ui, details, entry.app, t);
+            ui.add_space(14.0);
+            self.release_section(ui, entry, details, t, 2);
         }
     }
 
@@ -261,36 +269,7 @@ impl LauncherUi {
                 });
             });
             ui.add_space(10.0);
-            let hero_w = ui.available_width();
-            ui.horizontal(|ui| {
-                if let Some(icon) = crate::icons::app(app.id) {
-                    ui.add(egui::Image::new(icon).fit_to_exact_size(vec2(ICON, ICON)));
-                }
-                ui.add_space(8.0);
-                // Beside the buttons when the page is wide: the text keeps what they leave.
-                let text_w = if wide { (hero_w - ICON - 16.0 - ACTION_W - 24.0).max(200.0) } else { (hero_w - ICON - 16.0).max(40.0) };
-                ui.vertical(|ui| {
-                    ui.set_width(text_w);
-                    ui.spacing_mut().item_spacing.y = 5.0;
-                    widgets::wordmark(ui, app, theme::PAGE_TITLE);
-                    ui.add(egui::Label::new(RichText::new(details.headline).size(15.0).color(t.ink)).wrap());
-                    // "Version 0.5.0 · Oct 8, 2026", or the installed-versus-latest line.
-                    let version = crate::views::version_line(entry, &status);
-                    if !version.trim().is_empty() {
-                        ui.label(RichText::new(version).size(12.5).color(t.muted));
-                    }
-                });
-                if wide {
-                    // The main button and its menu, at the right, level with the name.
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.allocate_ui_with_layout(vec2(ACTION_W, theme::CONTROL_H), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                            self.actions_in(ui, entry, &status, ACTION_W, false);
-                        });
-                    });
-                }
-            });
-            ui.add_space(14.0);
-            // The menu leaves out the links: they are the buttons right below.
+            self.hero_identity(ui, entry, details, &status, t, wide);
             if !wide {
                 let row_w = ui.available_width();
                 ui.horizontal(|ui| self.actions_in(ui, entry, &status, row_w, false));
@@ -300,6 +279,40 @@ impl LauncherUi {
         let r = hero.response.rect;
         ui.painter().rect_filled(Rect::from_min_size(r.min, vec2(r.width(), 2.0)), CornerRadius::ZERO, app_color);
         ui.painter().hline(r.x_range(), r.bottom() - 0.5, t.hairline());
+    }
+
+    /// The close button and the previous / next pair, right-aligned in the hero's top row.
+    fn hero_identity(&mut self, ui: &mut Ui, entry: &AppEntry, details: &AppDetails, status: &AppStatus, t: &Tokens, wide: bool) {
+        let app = entry.app;
+        let hero_w = ui.available_width();
+        ui.horizontal(|ui| {
+            if let Some(icon) = crate::icons::app(app.id) {
+                // Decorative: the wordmark beside it carries the app name.
+                ui.add(egui::Image::new(icon).fit_to_exact_size(vec2(ICON, ICON)));
+            }
+            ui.add_space(8.0);
+            // Beside the buttons when the page is wide: the text keeps what they leave.
+            let text_w = if wide { (hero_w - ICON - 16.0 - ACTION_W - 24.0).max(200.0) } else { (hero_w - ICON - 16.0).max(40.0) };
+            ui.vertical(|ui| {
+                ui.set_width(text_w);
+                ui.spacing_mut().item_spacing.y = 5.0;
+                widgets::wordmark(ui, app, theme::PAGE_TITLE);
+                ui.add(egui::Label::new(RichText::new(details.headline).size(15.0).color(t.ink)).wrap());
+                // "Version 0.5.0 · Oct 8, 2026", or the installed-versus-latest line.
+                let version = crate::views::version_line(entry, status);
+                if !version.trim().is_empty() {
+                    ui.label(RichText::new(version).size(12.5).color(t.muted));
+                }
+            });
+            if wide {
+                // The main button and its menu, at the right, level with the name.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.allocate_ui_with_layout(vec2(ACTION_W, theme::CONTROL_H), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        self.actions_in(ui, entry, status, ACTION_W, false);
+                    });
+                });
+            }
+        });
     }
 
     /// The facts of the latest release in cells, then its notes.
@@ -350,46 +363,51 @@ impl LauncherUi {
         let src = self.picture_source(details.id, shot.key);
         let failed = self.failure(details.id, shot.key);
         let full = ctx.content_rect();
-        egui::Area::new(Id::new("details-lightbox")).order(Order::Tooltip).fixed_pos(full.min).show(ctx, |ui| {
-            let (rect, backdrop) = ui.allocate_exact_size(full.size(), Sense::click());
-            ui.painter().rect_filled(rect, CornerRadius::ZERO, theme::backdrop());
-            // As large as the window allows, but no larger than 1400 points: the files are 1200 px wide.
-            let room = rect.shrink2(vec2(112.0, 96.0));
-            let w = room.width().min(room.height() / SHOT_ASPECT).clamp(1.0, 1400.0);
-            let pic = Rect::from_center_size(rect.center(), vec2(w, w * SHOT_ASPECT));
-            match src {
-                Some(src) => egui::Image::new(src).paint_at(ui, pic),
-                // Flipped to a picture that hasn't arrived: the same frame, saying so.
-                None => placeholder(ui, pic, Id::new("lightbox-placeholder"), failed.as_deref(), t, true),
-            }
-            ui.painter().rect_stroke(pic, CornerRadius::ZERO, Stroke::new(1.0, theme::backdrop_ink(40)), egui::StrokeKind::Outside);
-            let caption = if count > 1 { format!("{} · {}/{count}", shot.caption, at + 1) } else { shot.caption.to_string() };
-            let ink = theme::backdrop_ink(190);
-            let galley = widgets::hud_galley(ui, &caption, ink);
-            let caption_at = pos2(rect.center().x - galley.size().x / 2.0, pic.bottom() + 14.0);
-            ui.painter().galley(caption_at, galley, ink);
+        egui::Area::new(Id::unique("details-lightbox"))
+            .order(Order::Tooltip)
+            .fixed_pos(full.min)
+            .role(egui::Role::Dialog)
+            .accessible_name(format!("{}: {}", tl!("Enlarge picture"), CraftApp::by_id(details.id).map_or("", |app| app.name)))
+            .show(ctx, |ui| {
+                let (rect, backdrop) = ui.allocate_exact_size(full.size(), Sense::click());
+                ui.painter().rect_filled(rect, CornerRadius::ZERO, theme::backdrop());
+                // As large as the window allows, but no larger than 1400 points: the files are 1200 px wide.
+                let room = rect.shrink2(vec2(112.0, 96.0));
+                let w = room.width().min(room.height() / SHOT_ASPECT).clamp(1.0, 1400.0);
+                let pic = Rect::from_center_size(rect.center(), vec2(w, w * SHOT_ASPECT));
+                match src {
+                    Some(src) => egui::Image::new(src).paint_at(ui, pic),
+                    // Flipped to a picture that hasn't arrived: the same frame, saying so.
+                    None => placeholder(ui, pic, Id::unique("lightbox-placeholder"), failed.as_deref(), t, true),
+                }
+                ui.painter().rect_stroke(pic, CornerRadius::ZERO, Stroke::new(1.0, theme::backdrop_ink(40)), egui::StrokeKind::Outside);
+                let caption = if count > 1 { format!("{} · {}/{count}", shot.caption, at + 1) } else { shot.caption.to_string() };
+                let ink = theme::backdrop_ink(190);
+                let galley = widgets::hud_galley(ui, &caption, ink);
+                let caption_at = pos2(rect.center().x - galley.size().x / 2.0, pic.bottom() + 14.0);
+                ui.painter().galley(caption_at, galley, ink);
 
-            if count > 1 {
-                let y = pic.center().y - ARROW / 2.0;
-                let prev = Rect::from_min_size(pos2(pic.left() - 16.0 - ARROW, y), vec2(ARROW, ARROW));
-                let next = Rect::from_min_size(pos2(pic.right() + 16.0, y), vec2(ARROW, ARROW));
-                if arrow_button(ui, prev, Id::new("zoom-prev"), true, tl!("Previous picture (←)"), t) {
-                    self.flip_shot(count, false);
+                if count > 1 {
+                    let y = pic.center().y - ARROW / 2.0;
+                    let prev = Rect::from_min_size(pos2(pic.left() - 16.0 - ARROW, y), vec2(ARROW, ARROW));
+                    let next = Rect::from_min_size(pos2(pic.right() + 16.0, y), vec2(ARROW, ARROW));
+                    if arrow_button(ui, prev, Id::unique("zoom-prev"), true, tl!("Previous picture (←)"), t) {
+                        self.flip_shot(count, false);
+                    }
+                    if arrow_button(ui, next, Id::unique("zoom-next"), false, tl!("Next picture (→)"), t) {
+                        self.flip_shot(count, true);
+                    }
                 }
-                if arrow_button(ui, next, Id::new("zoom-next"), false, tl!("Next picture (→)"), t) {
-                    self.flip_shot(count, true);
+                let close =
+                    Rect::from_min_size(pos2(rect.right() - 16.0 - theme::CONTROL_H, rect.top() + 16.0), vec2(theme::CONTROL_H, theme::CONTROL_H));
+                let mut done = backdrop.clicked();
+                ui.scope_builder(egui::UiBuilder::new().max_rect(close), |ui| {
+                    done |= widgets::glyph_button(ui, Glyph::Close, tl!("Close (Esc)")).clicked();
+                });
+                if done {
+                    self.detail_zoom = false;
                 }
-            }
-            let close =
-                Rect::from_min_size(pos2(rect.right() - 16.0 - theme::CONTROL_H, rect.top() + 16.0), vec2(theme::CONTROL_H, theme::CONTROL_H));
-            let mut done = backdrop.clicked();
-            ui.scope_builder(egui::UiBuilder::new().max_rect(close), |ui| {
-                done |= widgets::glyph_button(ui, Glyph::Close, tl!("Close (Esc)")).clicked();
             });
-            if done {
-                self.detail_zoom = false;
-            }
-        });
     }
 
     /// The lead screenshot, its caption, and a row of thumbnails to switch between them. A picture
@@ -400,7 +418,7 @@ impl LauncherUi {
         let pic = match self.picture_source(details.id, current.key) {
             Some(lead) => {
                 let image = ui.add(egui::Image::new(lead).fit_to_exact_size(vec2(w, w * SHOT_ASPECT)).sense(Sense::click()));
-                image.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Enlarge picture")));
+                image.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tl!("Enlarge picture")));
                 let rect = image.rect;
                 // The arrows below are added after the picture, so they keep their own clicks.
                 if image.on_hover_cursor(egui::CursorIcon::ZoomIn).on_hover_text(tl!("Click to enlarge")).clicked() {
@@ -411,7 +429,7 @@ impl LauncherUi {
             None => {
                 let (rect, _) = ui.allocate_exact_size(vec2(w, w * SHOT_ASPECT), Sense::hover());
                 let failed = self.failure(details.id, current.key);
-                placeholder(ui, rect, Id::new("lead-placeholder"), failed.as_deref(), t, false);
+                placeholder(ui, rect, Id::unique("lead-placeholder"), failed.as_deref(), t, false);
                 rect
             }
         };
@@ -425,10 +443,10 @@ impl LauncherUi {
         let y = pic.center().y - ARROW / 2.0;
         let prev = Rect::from_min_size(pos2(pic.left() + 10.0, y), vec2(ARROW, ARROW));
         let next = Rect::from_min_size(pos2(pic.right() - 10.0 - ARROW, y), vec2(ARROW, ARROW));
-        if arrow_button(ui, prev, Id::new("shot-prev"), true, tl!("Previous picture (←)"), t) {
+        if arrow_button(ui, prev, Id::unique("shot-prev"), true, tl!("Previous picture (←)"), t) {
             self.flip_shot(count, false);
         }
-        if arrow_button(ui, next, Id::new("shot-next"), false, tl!("Next picture (→)"), t) {
+        if arrow_button(ui, next, Id::unique("shot-next"), false, tl!("Next picture (→)"), t) {
             self.flip_shot(count, true);
         }
         widgets::hud(ui, &format!("{} · {}/{count}", current.caption, self.detail_shot.min(count - 1) + 1), t.faint);
@@ -456,6 +474,7 @@ impl LauncherUi {
                 }
                 let stroke = if selected { Stroke::new(2.0, app_color) } else { t.hairline() };
                 ui.painter().rect_stroke(resp.rect, CornerRadius::ZERO, stroke, egui::StrokeKind::Inside);
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, shot.caption));
                 if resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(shot.caption).clicked() {
                     self.detail_shot = i;
                 }
@@ -473,7 +492,7 @@ fn placeholder(ui: &mut Ui, rect: Rect, id: Id, failed: Option<&str>, t: &Tokens
     let galley = ui.painter().layout(text.to_string(), egui::FontId::proportional(13.5), ink, (rect.width() - 32.0).max(1.0));
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, ink);
     let resp = ui.interact(rect, id, Sense::hover());
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, text));
     if let Some(why) = failed {
         resp.on_hover_text(why);
     }
@@ -490,7 +509,7 @@ fn step_button(ui: &mut Ui, left: bool, tip: &str, t: &Tokens) -> bool {
         vec![pos2(c.x - s * 3.0, c.y - 5.5), pos2(c.x + s * 3.0, c.y), pos2(c.x - s * 3.0, c.y + 5.5)],
         Stroke::new(1.75, ink),
     ));
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tip));
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip).clicked()
 }
 
@@ -502,7 +521,7 @@ fn link_buttons(ui: &mut Ui, app: &CraftApp) {
         ui.spacing_mut().item_spacing.x = 8.0;
         for (label, url) in links {
             if widgets::button(ui, &format!("{label} ↗"), Kind::Secondary, 0.0).on_hover_text(url.as_str()).clicked() {
-                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                widgets::open_external_link(ui.ctx(), &url);
             }
         }
     });
@@ -535,6 +554,6 @@ fn arrow_button(ui: &mut Ui, rect: Rect, id: Id, left: bool, tip: &str, t: &Toke
     let (c, s) = (rect.center(), if left { -1.0 } else { 1.0 });
     let points = vec![pos2(c.x - s * 3.5, c.y - 6.0), pos2(c.x + s * 3.5, c.y), pos2(c.x - s * 3.5, c.y + 6.0)];
     painter.add(egui::Shape::line(points, Stroke::new(1.75, ink)));
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tip));
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip).clicked()
 }

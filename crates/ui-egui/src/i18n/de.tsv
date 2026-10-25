@@ -96,6 +96,8 @@
 	Updates always use the format an app was installed with.	Updates verwenden immer das Format, mit dem eine App installiert wurde.
 	Running in the background	Im Hintergrund ausführen
 	Keep running in the tray when the window is closed	Beim Schließen des Fensters im Infobereich weiterlaufen
+	Zendaya Launcher is still running	Zendaya Launcher läuft weiter
+	It's in the tray: open it or quit it from the tray icon, or turn this off in the settings.	Er ist im Infobereich: dort über das Symbol öffnen oder beenden, oder das in den Einstellungen abschalten.
 	Show the window on the current desktop	Fenster auf dem aktuellen Schreibtisch zeigen
 	Start Zendaya Launcher when I log in	Zendaya Launcher bei der Anmeldung starten
 	Community	Community
@@ -338,6 +340,7 @@ filter	Installed	Installiert
 	ArtCraft on GitHub	ArtCraft auf GitHub
 	Join the ArtCraft Discord	Dem ArtCraft-Discord beitreten
 	App details	App-Details
+	More actions for {name}	Weitere Aktionen für {name}
 	Close (Esc)	Schließen (Esc)
 	Features	Funktionen
 	Latest release	Neueste Version

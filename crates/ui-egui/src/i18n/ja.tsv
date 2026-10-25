@@ -98,6 +98,8 @@
 	Updates always use the format an app was installed with.	更新は常に、アプリをインストールしたときの形式で行われます。
 	Running in the background	バックグラウンドで実行
 	Keep running in the tray when the window is closed	ウィンドウを閉じてもトレイで実行し続ける
+	Zendaya Launcher is still running	Zendaya Launcher は実行中です
+	It's in the tray: open it or quit it from the tray icon, or turn this off in the settings.	トレイに入りました。トレイのアイコンから開くか終了できます。設定でこの動作を無効にすることもできます。
 	Show the window on the current desktop	現在のデスクトップにウィンドウを表示
 	Start Zendaya Launcher when I log in	ログイン時に Zendaya Launcher を起動
 	Community	コミュニティ
@@ -268,6 +270,7 @@ column	Released	公開日
 # Contextual: the filter tab names a group (the status pill says "Installed")
 filter	Installed	インストール済み
 	App details	アプリの詳細
+	More actions for {name}	{name} のその他の操作
 	Close (Esc)	閉じる (Esc)
 	Features	機能
 	Latest release	最新リリース

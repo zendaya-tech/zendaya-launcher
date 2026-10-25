@@ -118,20 +118,46 @@ impl Backend for PlatformFake {
 struct NoHost;
 impl Host for NoHost {}
 
+/// A harness that has the launcher's fonts, theme and image loaders before its first pass, and
+/// never paints a synthetic cursor into saved images.
+fn test_harness_builder<State>(theme: egui::Theme) -> egui_kittest::HarnessBuilder<State> {
+    let choice = if theme == egui::Theme::Dark {
+        artcraft_launcher_ui_egui::theme::ThemeChoice::Dark
+    } else {
+        artcraft_launcher_ui_egui::theme::ThemeChoice::Light
+    };
+    egui_kittest::HarnessBuilder::default()
+        // 0.37 defaults: strict accessible names and a panic on a missing glyph. Neither is
+        // relaxed here; fixed controls are painter-drawn and dynamic notes/feed text uses the
+        // attributed monochrome emoji fonts.
+        .with_accessibility_check(true)
+        .with_render_cursor(false)
+        .with_context_setup(move |ctx| {
+            artcraft_launcher_ui_egui::theme::install_fonts(ctx, None);
+            egui_extras::install_image_loaders(ctx);
+            artcraft_launcher_ui_egui::theme::apply(ctx, choice);
+        })
+}
+
 fn release(id: &str, v: &str, at: i64) -> Release {
     let name = format!("{id}-{v}-macos-universal.dmg");
+    let repo = match id {
+        "photozen" | "photocraft" => artcraft_launcher_core::catalog::PHOTOZEN.repo.to_string(),
+        "artcraft-launcher" => artcraft_launcher_core::catalog::LAUNCHER_REPO.to_string(),
+        _ => format!("zendaya-tech/{id}"),
+    };
     Release {
         tag: format!("v{v}"),
         version: version::parse(v),
         name: format!("v{v}"),
         published_at: Some(at),
-        html_url: format!("https://github.com/storytold/{id}/releases/tag/v{v}"),
+        html_url: format!("https://github.com/{repo}/releases/tag/v{v}"),
         notes: "## What's Changed\n* Faster things by @a in https://github.com/storytold/x/pull/1".into(),
         prerelease: false,
         assets: vec![Asset {
             name: name.clone(),
             size: 150 << 20,
-            url: format!("https://github.com/storytold/{id}/releases/download/v{v}/{name}"),
+            url: format!("https://github.com/{repo}/releases/download/v{v}/{name}"),
             sha256: None,
         }],
     }
@@ -235,6 +261,9 @@ fn harness_with_discord(discord_url: Option<&'static str>) -> (Harness<'static, 
 }
 
 #[allow(clippy::too_many_arguments)] // Test fixture inputs vary independently across existing cases.
+/// Builds a harness with the full fixture matrix (events, view, theme, manage mode, scale, title
+/// bar, pictures, platform and Discord URL), forces English labels, and returns the recorded
+/// commands.
 fn harness_full(
     events: Vec<Event>,
     view: ViewMode,
@@ -268,7 +297,7 @@ fn harness_full(
     let settings = Settings { view, notify: false, ..Settings::default() };
     // No `.wgpu()`: it gives every test its own GPU device, and those segfault on parallel test threads (see above).
     // The default renderer creates one only when a test renders.
-    let mut harness = Harness::builder().with_size(egui::vec2(1180.0, 1200.0)).with_pixels_per_point(scale).with_theme(theme).build_ui_state(
+    let mut harness = test_harness_builder(theme).with_size(egui::vec2(1180.0, 1200.0)).with_pixels_per_point(scale).build_ui_state(
         move |ui, state: &mut Option<LauncherUi>| {
             if state.is_none()
                 && let Some(b) = backend.take()
@@ -296,12 +325,21 @@ fn harness_full(
     (harness, sent)
 }
 
+/// Save a PNG under `ARTCRAFT_LAUNCHER_SNAPSHOTS` when that is set. `name` is a test-owned file
+/// stem (the test names and sizes make each one unique), never a path: a separator is rejected so
+/// no caller can write outside the evidence directory.
 fn snapshot(h: &mut Harness<'_, Option<LauncherUi>>, name: &str) {
     let Some(dir) = std::env::var_os("ARTCRAFT_LAUNCHER_SNAPSHOTS") else { return };
+    assert!(
+        !name.is_empty() && !name.contains(['/', '\\']) && name != "." && name != "..",
+        "snapshot name must be one pathless file stem, got {name:?}"
+    );
     let img = h.render().unwrap();
     img.save(std::path::Path::new(&dir).join(format!("{name}.png"))).unwrap();
 }
 
+/// A managing macOS fixture with a fresh Photozen release and a scripted folder picker, for
+/// the install-folder flow.
 fn folder_harness(picked: Rc<RefCell<Option<String>>>) -> (Harness<'static, Option<LauncherUi>>, Rc<RefCell<Vec<Command>>>) {
     struct Picker(Rc<RefCell<Option<String>>>);
     impl Host for Picker {
@@ -323,7 +361,7 @@ fn folder_harness(picked: Rc<RefCell<Option<String>>>) -> (Harness<'static, Opti
         clock: Rc::new(Cell::new(NOW)),
     });
     let mut host = Picker(picked);
-    let mut harness = Harness::builder().with_size(egui::vec2(1180.0, 900.0)).build_ui_state(
+    let mut harness = test_harness_builder(egui::Theme::Dark).with_size(egui::vec2(1180.0, 900.0)).build_ui_state(
         move |ui, state: &mut Option<LauncherUi>| {
             if let Some(backend) = backend.take() {
                 *state = Some(LauncherUi::new(ui.ctx(), Box::new(backend), Settings { notify: false, ..Default::default() }));
@@ -348,6 +386,9 @@ fn install_commands(sent: &RefCell<Vec<Command>>) -> Vec<Command> {
 }
 
 #[test]
+/// A custom-folder install opens a confirmation dialog with no command until Install; the
+/// chosen root and per-app folder are persisted, Configure precedes Install, and Cancel keeps
+/// no override.
 fn a_fresh_install_confirms_the_folder_and_configures_before_installing() {
     let picked = Rc::new(RefCell::new(None));
     let (mut h, sent) = folder_harness(picked.clone());
@@ -369,6 +410,7 @@ fn a_fresh_install_confirms_the_folder_and_configures_before_installing() {
     h.run_steps(4);
     assert!(!sent.borrow().iter().any(|c| matches!(c, Command::Install { .. })));
     h.get_by_label("Apps are placed inside this folder.");
+    h.check_accessibility();
     snapshot(&mut h, "install-folder-confirmation");
     *picked.borrow_mut() = Some("/Volumes/Photo".into());
     h.get_by_label("Browse…").click();
@@ -456,6 +498,286 @@ fn windows_package_choice_can_select_portable_and_configures_the_backend() {
     );
 }
 
+/// The narrow 1000 x 700 native window that first showed it: a ComboBox grows to the width its
+/// layout offers, so an unconstrained one started at the label's last glyph and painted over
+/// "Install new apps as". The test reads the real widget rects, not a snapshot.
+#[test]
+fn a_narrow_settings_row_keeps_its_control_clear_of_its_label() {
+    let (mut h, _sent) = harness_full(
+        events(),
+        ViewMode::Grid,
+        egui::Theme::Light,
+        true,
+        1.0,
+        artcraft_launcher_ui_egui::TitleBar::Native,
+        Rc::default(),
+        Some(Platform { os: Os::Windows, arch: Arch::X64 }),
+        None,
+    );
+    h.set_size(egui::vec2(1000.0, 700.0));
+    h.run_steps(6);
+    h.get_by_label("Settings").click();
+    h.run_steps(6);
+    h.get_by_role_and_label(egui::accesskit::Role::Label, "Install new apps as").scroll_to_me();
+    h.run_steps(3);
+    let label = h.get_by_role_and_label(egui::accesskit::Role::Label, "Install new apps as").rect();
+    // Several combo boxes are on the settings page; the format chooser is the one nearest the
+    // label, whichever column the dialog's size puts it in.
+    let combo = h
+        .query_all_by_role(egui::accesskit::Role::ComboBox)
+        .min_by_key(|node| {
+            let r = node.rect();
+            ((r.center().x - label.center().x).abs() + (r.center().y - label.center().y).abs()) as i32
+        })
+        .expect("the install-format chooser is on screen")
+        .rect();
+    assert!(!label.intersects(combo), "the label {label:?} overlaps its combo box {combo:?}");
+    assert!(
+        (label.center().y - combo.center().y).abs() < 2.0 && combo.left() >= label.right() + 4.0 || combo.top() >= label.bottom() + 4.0,
+        "the label {label:?} and its combo box {combo:?} must keep a clear gap, on one row or stacked"
+    );
+}
+
+/// Drives the real launcher lifecycle (`logic` then `ui`) in one `Context::run_ui` pass, optionally
+/// asking egui for a discarded second pass over the same input.
+fn drive_launcher(launcher: &mut LauncherUi, ctx: &egui::Context, events: Vec<egui::Event>, time: f64, two_passes: bool) {
+    let mut first = two_passes;
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1180.0, 1200.0))),
+        time: Some(time),
+        events,
+        ..Default::default()
+    };
+    let _ = ctx.run_ui(input, |root| {
+        if first {
+            first = false;
+            root.ctx().request_discard("test: force a second pass");
+        }
+        launcher.logic(&root.ctx().clone(), &mut NoHost);
+        launcher.ui(root, &mut NoHost);
+    });
+}
+
+/// Drives one pointer gesture as move, press and release over separate frames, optionally
+/// asking for a discarded second pass on release.
+fn click_steps(launcher: &mut LauncherUi, ctx: &egui::Context, at: egui::Pos2, time: f64, two_passes_on_release: bool) {
+    let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    drive_launcher(launcher, ctx, vec![egui::Event::PointerMoved(at)], time, false);
+    drive_launcher(launcher, ctx, vec![button(true)], time + 0.1, false);
+    drive_launcher(launcher, ctx, vec![button(false)], time + 0.2, two_passes_on_release);
+}
+
+/// Counts the `Install` commands among the recorded backend commands.
+fn install_count(sent: &RefCell<Vec<Command>>) -> usize {
+    sent.borrow().iter().filter(|c| matches!(c, Command::Install { .. })).count()
+}
+
+/// The AccessKit target of a visible widget, as an assistive technology would address it.
+fn accesskit_target(h: &Harness<'_, Option<LauncherUi>>, label: &str) -> (egui::accesskit::NodeId, egui::accesskit::TreeId) {
+    h.get_by_label(label).accesskit_node().locate()
+}
+
+/// The semantic click a screen reader emits for `target`, addressed exactly as the tree did.
+fn accesskit_click(target: (egui::accesskit::NodeId, egui::accesskit::TreeId)) -> egui::Event {
+    egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+        target_node: target.0,
+        target_tree: target.1,
+        action: egui::accesskit::Action::Click,
+        data: None,
+    })
+}
+
+/// Runs one visible frame with a semantic (AccessKit) click delivered on every egui pass, or over
+/// one pass only when `two_passes` is false. This is the actual UI path: delivering the same click
+/// on a discarded pass lets a button's own `clicked()` handler queue its action twice, so a call
+/// site that bypasses `act_command`/`act` is caught instead of being hidden by egui's
+/// first-pass-only pointer events.
+///
+/// An AccessKit request belongs to the `RawInput` of a pass, exactly as kittest queues it;
+/// inserting it with `Context::input_mut` after `begin_pass` is too late in 0.37. `run_ui` also
+/// spends the raw events on its first pass and re-runs the second pass without them, so the passes
+/// are driven explicitly. They share one `cumulative_frame_nr` (the action boundary's visible-frame
+/// identity): `run_ui` advances that counter once per visible frame, while `begin_pass`/`end_pass`
+/// do not. The empty priming frame starts a fresh frame without drawing anything.
+fn drive_accesskit_click(
+    launcher: &mut LauncherUi,
+    ctx: &egui::Context,
+    target: (egui::accesskit::NodeId, egui::accesskit::TreeId),
+    time: f64,
+    two_passes: bool,
+) {
+    let screen_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1180.0, 1200.0));
+    let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(screen_rect), time: Some(time), ..Default::default() }, |_| {});
+    let passes = if two_passes { 2 } else { 1 };
+    for pass in 0..passes {
+        ctx.begin_pass(egui::RawInput {
+            screen_rect: Some(screen_rect),
+            time: Some(time),
+            events: vec![accesskit_click(target)],
+            ..Default::default()
+        });
+        ctx.root_ui(|root| {
+            if two_passes && pass == 0 {
+                root.ctx().request_discard("test: repeat the semantic click in this frame");
+            }
+            // Match Harness::build_ui_state's scope and frame: auto widget IDs include both.
+            // Drawing directly in root_ui addresses different nodes than the captured tree.
+            root.scope_builder(egui::UiBuilder::new(), |ui| {
+                egui::Frame::central_panel(ui.style()).outer_margin(8.0).inner_margin(0.0).show(ui, |ui| {
+                    launcher.logic(&ui.ctx().clone(), &mut NoHost);
+                    launcher.ui(ui, &mut NoHost);
+                });
+            });
+        });
+        let _ = ctx.end_pass();
+    }
+}
+
+/// The end-to-end shape of one pointer gesture per frame. A discarded second pass has no pointer
+/// events (egui clears them after the first pass), so this alone cannot catch a call site that
+/// bypasses the action boundary. The AccessKit-click tests below re-deliver the same semantic click
+/// on every pass and therefore exercise the actual UI call sites twice in one visible frame.
+#[test]
+fn the_same_download_is_sent_once_across_discarded_passes_but_again_next_frame() {
+    let (mut h, sent) = harness(ViewMode::Grid, egui::Theme::Dark, true);
+    h.run_steps(8);
+    let at = h.get_by_label("Update to 0.5.0").rect().center();
+    let ctx = h.ctx.clone();
+    let mut launcher = h.state_mut().take().expect("the harness built the launcher");
+
+    sent.borrow_mut().clear();
+    click_steps(&mut launcher, &ctx, at, 100.0, true);
+    assert_eq!(install_count(&sent), 1, "one visible frame must send one install, not one per pass: {:?}", sent.borrow());
+
+    // A new frame is a new user gesture: the guard from the previous frame must not swallow it.
+    sent.borrow_mut().clear();
+    click_steps(&mut launcher, &ctx, at, 200.0, false);
+    assert_eq!(install_count(&sent), 1, "the next frame must accept the same action again: {:?}", sent.borrow());
+}
+
+#[test]
+/// Clicking Open across a discarded second pass increments the launch counter once for the
+/// visible frame.
+fn opening_an_app_counts_once_across_discarded_passes() {
+    let (mut h, _sent) = harness_with(store_events(true), ViewMode::Grid, egui::Theme::Dark, true, 1.0);
+    h.run_steps(8);
+    let at = h.get_all_by_label("Open").next().expect("an up-to-date app has an Open button").rect().center();
+    let ctx = h.ctx.clone();
+    let mut launcher = h.state_mut().take().expect("the harness built the launcher");
+    let before = launcher.settings.launches.values().copied().sum::<u32>();
+    click_steps(&mut launcher, &ctx, at, 100.0, true);
+    let after = launcher.settings.launches.values().copied().sum::<u32>();
+    assert_eq!(after, before + 1, "one launch gesture increments the count once");
+}
+
+#[test]
+/// The real Update button, clicked through AccessKit on every pass, crosses the action boundary
+/// once per frame and again on the next frame.
+fn the_actual_update_button_queues_once_across_a_discarded_pass() {
+    let (mut h, sent) = harness(ViewMode::Grid, egui::Theme::Dark, true);
+    h.run_steps(8);
+    let target = accesskit_target(&h, "Update to 0.5.0");
+    let ctx = h.ctx.clone();
+    let mut launcher = h.state_mut().take().expect("the harness built the launcher");
+    sent.borrow_mut().clear();
+    drive_accesskit_click(&mut launcher, &ctx, target, 100.0, true);
+    assert_eq!(install_count(&sent), 1, "the real Update button must cross the action boundary once: {:?}", sent.borrow());
+    // The next visible frame is a new gesture, not a repeated pass.
+    sent.borrow_mut().clear();
+    drive_accesskit_click(&mut launcher, &ctx, target, 200.0, false);
+    assert_eq!(install_count(&sent), 1, "the next frame must accept the same action again: {:?}", sent.borrow());
+}
+
+#[test]
+/// The real Open button, clicked through AccessKit on every pass, delivers one `Launch` and
+/// increments the count once.
+fn the_actual_open_button_launches_once_across_a_discarded_pass() {
+    let (mut h, sent) = harness_with(store_events(true), ViewMode::Grid, egui::Theme::Dark, true, 1.0);
+    h.run_steps(8);
+    let target = h.get_all_by_label("Open").next().expect("an up-to-date app has an Open button").accesskit_node().locate();
+    let ctx = h.ctx.clone();
+    let mut launcher = h.state_mut().take().expect("the harness built the launcher");
+    let before = launcher.settings.launches.values().copied().sum::<u32>();
+    sent.borrow_mut().clear();
+    drive_accesskit_click(&mut launcher, &ctx, target, 100.0, true);
+    let launches = sent.borrow().iter().filter(|c| matches!(c, Command::Launch { .. })).count();
+    assert_eq!(launches, 1, "the real Open button must deliver one launch, not one per pass: {:?}", sent.borrow());
+    assert_eq!(launcher.settings.launches.values().copied().sum::<u32>(), before + 1, "the launch count increments once");
+}
+
+#[test]
+/// A toast created by logic while no window ran is shown once on the first drawing pass and
+/// expires relative to that pass.
+fn a_job_finished_while_hidden_shows_one_fresh_toast_on_the_next_frame() {
+    artcraft_launcher_ui_egui::i18n::set_test_lang(artcraft_launcher_ui_egui::i18n::Lang::EN);
+    let sent = Rc::new(RefCell::new(Vec::new()));
+    let backend = Fake {
+        events: vec![Event::JobFinished { app: "photozen".into(), result: Ok("Photozen updated to 0.5.0".into()) }],
+        sent: sent.clone(),
+        manage: true,
+        pictures: Rc::default(),
+        asked: Vec::new(),
+        clock: Rc::new(Cell::new(NOW)),
+    };
+    // Build the harness with no launcher first: its construction pass runs at time 0, before a test
+    // can set `RawInput::time`, and would otherwise consume the hidden message.
+    let mut attached = false;
+    // Ask for a discarded second pass on the first drawing frame: the toast path must be
+    // idempotent across passes, not just across steps.
+    let mut discard_once = true;
+    let mut h = test_harness_builder(egui::Theme::Dark).with_size(egui::vec2(1180.0, 1200.0)).build_ui_state(
+        move |ui, state: &mut Option<LauncherUi>| {
+            if let Some(l) = state {
+                if !attached {
+                    attached = true;
+                    l.attach(ui.ctx());
+                }
+                if discard_once {
+                    discard_once = false;
+                    ui.ctx().request_discard("test: discard the first drawing pass");
+                }
+                l.logic(&ui.ctx().clone(), &mut NoHost);
+                l.ui(ui, &mut NoHost);
+            }
+        },
+        None,
+    );
+    // The tray path: `logic` runs without any UI pass, with the input time of the last shown frame.
+    let windowless = egui::Context::default();
+    let mut launcher = LauncherUi::new(&windowless, Box::new(backend), Settings { notify: false, language: "en".into(), ..Settings::default() });
+    launcher.logic(&windowless, &mut NoHost);
+    *h.state_mut() = Some(launcher);
+    // The visible window's clock is far ahead of the logic-only tick's stale input time. The toast
+    // must be fresh on the first drawing pass and must expire relative to it.
+    h.input_mut().time = Some(1000.0);
+    h.run_steps(2);
+    assert_eq!(h.query_all_by_label("Photozen updated to 0.5.0").count(), 1, "the hidden result is shown once");
+    h.run_steps(2);
+    assert_eq!(h.query_all_by_label("Photozen updated to 0.5.0").count(), 1, "a discarded/next pass must not duplicate it");
+    // A stale expiry (old logic time + 4.5 s) would already have dropped it; at 1004.6 the real
+    // 1000.0 + 4.5 deadline has passed, so the toast goes.
+    h.input_mut().time = Some(1004.6);
+    h.run_steps(2);
+    assert!(h.query_by_label("Photozen updated to 0.5.0").is_none(), "the toast expires relative to the drawing pass");
+}
+
+#[test]
+/// At 560 px the toolbar's search, refresh, settings, sort and per-app menu keep their
+/// accessible names, with no unnamed input widgets and a strict accessibility pass.
+fn a_narrow_toolbar_names_its_controls_and_passes_strict_accessibility() {
+    let (mut h, _sent) = harness(ViewMode::Grid, egui::Theme::Dark, true);
+    h.set_size(egui::vec2(560.0, 900.0));
+    h.run_steps(6);
+    h.get_by_role_and_label(egui::accesskit::Role::TextInput, "Search apps");
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Check for updates");
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Settings");
+    h.get_by_role_and_label(egui::accesskit::Role::ComboBox, "Sort");
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "More actions for Photozen");
+    let unnamed = h.unnamed_widgets();
+    assert!(unnamed.is_empty(), "narrow toolbar has unnamed input widgets: {unnamed:?}");
+    h.check_accessibility();
+}
+
 #[test]
 fn install_locations_survive_settings_save_and_older_settings_use_system_default() {
     let old: Settings = serde_json::from_str(r#"{"auto_update":true}"#).unwrap();
@@ -470,6 +792,8 @@ fn install_locations_survive_settings_save_and_older_settings_use_system_default
 }
 
 #[test]
+/// Logic without a window still consumes backend events; attaching to a new window then draws
+/// the update cards.
 fn keeps_working_with_no_window_then_draws_in_a_new_one() {
     let sent = Rc::new(RefCell::new(Vec::new()));
     let backend =
@@ -483,7 +807,7 @@ fn keeps_working_with_no_window_then_draws_in_a_new_one() {
     assert_eq!(ui.settings.last_check, Some(NOW - 180));
 
     let mut attached = false;
-    let mut h = Harness::builder().with_size(egui::vec2(1180.0, 1200.0)).build_ui_state(
+    let mut h = test_harness_builder(egui::Theme::Dark).with_size(egui::vec2(1180.0, 1200.0)).build_ui_state(
         move |egui_ui, state: &mut LauncherUi| {
             if !attached {
                 attached = true;
@@ -540,6 +864,8 @@ fn downloads_can_be_paused_resumed_and_discarded() {
 }
 
 #[test]
+/// A kept download offers Retry install (which only opens install) and menu Download again
+/// (Cancel then Install); apps without a kept download do not offer it.
 fn a_kept_download_offers_retry_install_and_download_again() {
     let mut ev = store_events(false);
     ev.push(Event::ReadyToInstall { app: "photozen".into(), ready: true });
@@ -565,7 +891,7 @@ fn a_kept_download_offers_retry_install_and_download_again() {
     sent.borrow_mut().clear();
     // The … menu beside it.
     let beside = |r: egui::Rect| row.y_range().contains(r.center().y) && (row.right()..row.right() + 60.0).contains(&r.left());
-    h.get_all_by_label("…").find(|n| beside(n.rect())).unwrap().click();
+    h.get_all_by_label_contains("More actions").find(|n| beside(n.rect())).unwrap().click();
     h.run_steps(3);
     snapshot(&mut h, "grid-retry-install-menu-dark");
     h.get_by_label("Download again").click();
@@ -595,6 +921,8 @@ fn a_dismissed_install_prompt_is_not_called_a_cancelled_download() {
 }
 
 #[test]
+/// A ready update names its version and installs on Retry, while an up-to-date app offers
+/// Reinstall instead of Download again.
 fn a_kept_update_names_its_version_and_an_up_to_date_app_is_not_downloaded_again() {
     let mut ev = events();
     ev.push(Event::ReadyToInstall { app: "photozen".into(), ready: true });
@@ -606,9 +934,10 @@ fn a_kept_update_names_its_version_and_an_up_to_date_app_is_not_downloaded_again
     let mut ev = store_events(true);
     ev.push(Event::ReadyToInstall { app: "photozen".into(), ready: true });
     let (mut h, _) = harness_with(ev, ViewMode::Table, egui::Theme::Dark, true, 1.0);
-    h.get_by_label("…").click();
+    h.get_by_label_contains("More actions").click();
     h.run_steps(3);
     h.get_by_label("Reinstall");
+    h.check_accessibility();
     assert!(h.query_by_label("Download again").is_none());
 }
 
@@ -646,6 +975,23 @@ fn the_launcher_update_waiting_for_other_installs_can_be_cancelled() {
 }
 
 #[test]
+/// The launcher banner's Cancel crosses the action boundary once per visible frame.
+fn the_launcher_banner_cancel_is_sent_once_across_discarded_passes() {
+    let mut ev = events();
+    ev.push(Event::LauncherUpdate(release("artcraft-launcher", "0.2.0", NOW)));
+    ev.push(Event::Progress { app: "artcraft-launcher".into(), phase: JobPhase::Waiting });
+    let (mut h, sent) = harness_with(ev, ViewMode::Grid, egui::Theme::Dark, true, 1.0);
+    h.run_steps(6);
+    let at = h.get_by_label("Cancel update").rect().center();
+    let ctx = h.ctx.clone();
+    let mut launcher = h.state_mut().take().expect("the harness built the launcher");
+    sent.borrow_mut().clear();
+    click_steps(&mut launcher, &ctx, at, 100.0, true);
+    let cancels = sent.borrow().iter().filter(|c| matches!(c, Command::Cancel { .. })).count();
+    assert_eq!(cancels, 1, "the banner's Cancel must cross the action boundary once: {:?}", sent.borrow());
+}
+
+#[test]
 fn each_cancellation_says_what_it_called_off() {
     let finished = |app: &str, why: &str| Event::JobFinished { app: app.into(), result: Err(why.into()) };
     let mut ev = events();
@@ -680,11 +1026,13 @@ fn table_view_and_light_theme() {
 }
 
 #[test]
+/// Hide removes an app from All into Hidden Apps; Unhide restores it, clears the hidden set and
+/// returns the filter to All.
 fn hiding_an_app_removes_it_until_it_is_unhidden() {
     let (mut h, _) = harness(ViewMode::Table, egui::Theme::Dark, true);
     h.run_steps(6);
     let row = h.get_all_by_label("Photozen").next().unwrap().rect().center().y;
-    h.get_all_by_label("…").find(|n| (n.rect().center().y - row).abs() < 25.0).unwrap().click();
+    h.get_all_by_label_contains("More actions").find(|n| (n.rect().center().y - row).abs() < 25.0).unwrap().click();
     h.run_steps(3);
     h.get_by_label("Hide App").click();
     h.run_steps(4);
@@ -695,7 +1043,7 @@ fn hiding_an_app_removes_it_until_it_is_unhidden() {
     h.get_by_label("Photozen");
     assert!(h.query_by_label("WordCraft").is_none());
     let row = h.get_all_by_label("Photozen").next().unwrap().rect().center().y;
-    h.get_all_by_label("…").find(|n| (n.rect().center().y - row).abs() < 25.0).unwrap().click();
+    h.get_all_by_label_contains("More actions").find(|n| (n.rect().center().y - row).abs() < 25.0).unwrap().click();
     h.run_steps(3);
     h.get_by_label("Unhide App").click();
     h.run_steps(4);
@@ -706,6 +1054,8 @@ fn hiding_an_app_removes_it_until_it_is_unhidden() {
 }
 
 #[test]
+/// The view switch stores Table, and the table names each app once in its wordmark rather than
+/// again on the decorative icon.
 fn switching_views() {
     let (mut h, _) = harness(ViewMode::Grid, egui::Theme::Dark, true);
     h.run_steps(6);
@@ -717,7 +1067,7 @@ fn switching_views() {
 
 /// How far the middle of these lines of text is below the middle of the app icon beside them, in points.
 fn below_icon_centre(h: &Harness<'_, Option<LauncherUi>>, lines: &[&str]) -> f32 {
-    let text = lines.iter().map(|l| h.get_by_label(l).rect()).reduce(|a, b| a.union(b)).unwrap();
+    let text = lines.iter().map(|l| h.get_by_role_and_label(egui::accesskit::Role::Label, l).rect()).reduce(|a, b| a.union(b)).unwrap();
     let icon = h
         .query_all(egui_kittest::kittest::by().role(egui::accesskit::Role::Image))
         .map(|n| n.rect())
@@ -778,12 +1128,42 @@ fn every_table_column_sorts_both_ways() {
     }
 }
 
+/// The first close to the tray is explained once, by a system notification (#45, #215).
 #[test]
+fn the_first_close_to_the_tray_is_explained_once() {
+    struct Notices(Vec<(String, String)>);
+    impl Host for Notices {
+        fn notify(&mut self, title: &str, body: &str) {
+            self.0.push((title.to_string(), body.to_string()));
+        }
+    }
+    let (mut h, _) = harness(ViewMode::Grid, egui::Theme::Dark, true);
+    h.run_steps(6);
+    let mut host = Notices(Vec::new());
+    let l = h.state_mut().as_mut().unwrap();
+    assert!(!l.settings.tray_hint_shown);
+    l.hidden_to_tray(&mut host);
+    l.hidden_to_tray(&mut host);
+    assert!(l.settings.tray_hint_shown);
+    assert_eq!(host.0.len(), 1, "{:?}", host.0);
+    assert_eq!(host.0[0].0, "Zendaya Launcher is still running");
+    assert!(host.0[0].1.contains("tray icon"), "{}", host.0[0].1);
+}
+
+#[test]
+/// The Settings dialog announces its heading once and shows the community section's Discord
+/// entry alongside the footer's.
 fn settings_link_to_discord() {
     let (mut h, _) = harness(ViewMode::Grid, egui::Theme::Dark, true);
     h.run_steps(6);
     h.get_by_label("Settings").click();
     h.run_steps(4);
+    h.check_accessibility();
+    assert_eq!(
+        h.query_all_by_role_and_label(egui::accesskit::Role::Label, "Settings").count(),
+        1,
+        "the Settings hero icon must not repeat its heading"
+    );
     snapshot(&mut h, "settings-dark");
     h.get_by_label("Questions, ideas and news from the ArtCraft team");
     // The footer icon and the button in Settings.
@@ -791,6 +1171,8 @@ fn settings_link_to_discord() {
 }
 
 #[test]
+/// After the taller Settings dialog, the uninstall prompt keeps its own content-sized modal with
+/// its buttons close under the text (#88), and Cancel closes it.
 fn the_uninstall_prompt_keeps_its_own_size_after_a_taller_dialog() {
     let (mut h, _) = harness(ViewMode::Grid, egui::Theme::Dark, true);
     h.run_steps(6);
@@ -800,10 +1182,13 @@ fn the_uninstall_prompt_keeps_its_own_size_after_a_taller_dialog() {
     h.get_by_label("Done").click();
     h.run_steps(3);
     // Photozen is installed, so its … menu offers Uninstall.
-    h.get_all_by_label("…").next().unwrap().click();
+    h.get_all_by_label_contains("More actions").next().unwrap().click();
     h.run_steps(3);
     h.get_by_label("Uninstall…").click();
     h.run_steps(4);
+    h.check_accessibility();
+    h.get_by_role_and_label(egui::accesskit::Role::Label, "Uninstall Photozen?");
+    assert_eq!(h.query_all_by_label_contains("Uninstall Photozen?").count(), 1, "the title icon is decorative, not a second copy of the heading");
     snapshot(&mut h, "uninstall-prompt-dark");
     // The buttons follow the text closely, not somewhere down the height Settings had (#88).
     let text = h.get_by_label("The app will be moved to the Trash. Your documents and settings stay.").rect();
@@ -816,6 +1201,8 @@ fn the_uninstall_prompt_keeps_its_own_size_after_a_taller_dialog() {
 }
 
 #[test]
+/// The footer links website and GitHub, cards link only GitHub, and the table menu adds the
+/// app's website and repository.
 fn links_to_the_website_github_and_each_apps_pages() {
     let (mut h, _) = harness(ViewMode::Grid, egui::Theme::Dark, true);
     h.run_steps(6);
@@ -831,7 +1218,7 @@ fn links_to_the_website_github_and_each_apps_pages() {
     // The table's … menu has the app's website and GitHub repo.
     let (mut h, _) = harness(ViewMode::Table, egui::Theme::Dark, true);
     h.run_steps(6);
-    h.get_all_by_label("…").next().unwrap().click(); // WordCraft
+    h.get_all_by_label_contains("More actions").next().unwrap().click(); // WordCraft
     h.run_steps(3);
     h.get_by_label("GitHub repository");
     // The footer's Website link and WordCraft's now-live one in the menu.
@@ -865,6 +1252,8 @@ fn all_opened(h: &mut Harness<'_, Option<LauncherUi>>, label: &str) -> Vec<Strin
 }
 
 #[test]
+/// Footer, card and social links open their expected pages; one card menu's All releases action
+/// opens a repository releases page.
 fn links_open_the_right_pages() {
     let (mut h, _) = harness(ViewMode::Grid, egui::Theme::Dark, true);
     h.run_steps(6);
@@ -883,11 +1272,44 @@ fn links_open_the_right_pages() {
     assert_eq!(click_opens(&mut h, "Instagram").as_deref(), Some("https://www.instagram.com/officialartcraftstudios"));
     assert_eq!(click_opens(&mut h, "LinkedIn").as_deref(), Some("https://www.linkedin.com/company/artcraft-ai"));
     // The … menu.
-    h.get_all_by_label("…").next().unwrap().click();
+    h.get_all_by_label_contains("More actions").next().unwrap().click();
     h.run_steps(3);
     // The first card is the first installed app by name.
     let url = click_opens(&mut h, "All releases").unwrap_or_default();
     assert!(url.starts_with("https://github.com/zendaya-tech/") && url.ends_with("/releases"), "{url}");
+}
+
+/// An asset URL can come straight from GitHub's release JSON; it must not reach the opener when
+/// it carries an opener metacharacter, whether it is shown on a card or in the launcher dialog.
+#[test]
+fn hostile_release_asset_urls_never_reach_the_opener() {
+    const HOSTILE: &str = "https://github.com/zendaya-tech/photocraft/releases/download/v0.5.0/photozen-0.5.0-macos-universal.dmg|calc.exe";
+
+    let mut ev = events();
+    for event in &mut ev {
+        if let Event::Latest { app, latest: LatestRelease::Found(release), .. } = event
+            && app.as_str() == "photozen"
+            && let Some(asset) = release.assets.first_mut()
+        {
+            asset.url = HOSTILE.to_string();
+        }
+    }
+    let (mut h, _) = harness_with(ev, ViewMode::Grid, egui::Theme::Dark, false, 1.0);
+    h.run_steps(8);
+    assert_eq!(h.query_all_by_label("Download for macOS").count(), SUITE.len(), "the cards must offer their asset downloads");
+    let opened = all_opened(&mut h, "Download for macOS");
+    assert!(!opened.iter().any(|url| url.as_str() == HOSTILE), "a hostile card asset URL reached the opener: {opened:?}");
+
+    let mut ev = events();
+    let mut launcher_release = release("artcraft-launcher", "0.2.0", NOW);
+    launcher_release.assets[0].url =
+        "https://github.com/zendaya-tech/zendaya-launcher/releases/download/v0.2.0/artcraft-launcher-0.2.0-macos-universal.dmg|calc.exe".to_string();
+    ev.push(Event::LauncherUpdate(launcher_release));
+    let (mut h, _) = harness_with(ev, ViewMode::Grid, egui::Theme::Dark, false, 1.0);
+    h.run_steps(6);
+    assert_eq!(h.query_all_by_label("Download").count(), 1, "the launcher update dialog must be open");
+    let opened = all_opened(&mut h, "Download");
+    assert!(opened.is_empty(), "a hostile launcher-dialog asset URL reached the opener: {opened:?}");
 }
 
 #[test]
@@ -898,12 +1320,14 @@ fn discord_link_opens_app_when_discord_is_installed() {
 }
 
 #[test]
+/// Background detection waits five minutes: it is not sent at startup or on every frame, and is
+/// sent once at the five-minute mark.
 fn looks_again_at_installed_apps_every_few_minutes_not_every_frame() {
     let sent = Rc::new(RefCell::new(Vec::new()));
     let clock = Rc::new(Cell::new(NOW));
     let mut backend =
         Some(Fake { events: events(), sent: sent.clone(), manage: true, pictures: Rc::default(), asked: Vec::new(), clock: clock.clone() });
-    let mut h = Harness::builder().with_size(egui::vec2(1180.0, 1200.0)).build_ui_state(
+    let mut h = test_harness_builder(egui::Theme::Dark).with_size(egui::vec2(1180.0, 1200.0)).build_ui_state(
         move |ui, state: &mut Option<LauncherUi>| {
             if state.is_none()
                 && let Some(b) = backend.take()
@@ -929,6 +1353,8 @@ fn looks_again_at_installed_apps_every_few_minutes_not_every_frame() {
 }
 
 #[test]
+/// Update and restart queues `UpdateLauncher`, progress hides the button, and
+/// `LauncherRestarting` asks the host to quit; the update title is announced once.
 fn the_launcher_updates_itself_and_quits_to_restart() {
     struct QuitHost(Rc<Cell<bool>>);
     impl Host for QuitHost {
@@ -969,7 +1395,7 @@ fn the_launcher_updates_itself_and_quits_to_restart() {
         inner: Fake { events, sent: sent.clone(), manage: true, pictures: Rc::default(), asked: Vec::new(), clock: Rc::new(Cell::new(NOW)) },
         later: shared_events.clone(),
     });
-    let mut h = Harness::builder().with_size(egui::vec2(1180.0, 1200.0)).build_ui_state(
+    let mut h = test_harness_builder(egui::Theme::Dark).with_size(egui::vec2(1180.0, 1200.0)).build_ui_state(
         move |ui, state: &mut Option<LauncherUi>| {
             if state.is_none()
                 && let Some(b) = backend.take()
@@ -1002,6 +1428,8 @@ fn the_launcher_updates_itself_and_quits_to_restart() {
 }
 
 #[test]
+/// A found launcher update opens the relaunch prompt once; Later dismisses it and leaves the
+/// toolbar banner.
 fn launcher_update_prompts_to_relaunch_with_updated_version() {
     let mut ev = events();
     ev.push(Event::LauncherUpdate(release("artcraft-launcher", "0.2.0", NOW)));
@@ -1032,6 +1460,8 @@ fn the_current_desktop_setting_is_only_offered_where_the_os_has_desktops() {
 }
 
 #[test]
+/// A feed alert is acknowledged only by OK (persisted), while an inline announcement stays until
+/// its own Dismiss is clicked.
 fn feed_announcements_and_alerts_show_until_dismissed() {
     use artcraft_launcher_core::feed::Notice;
     let notice = |id: &str, title: &str, link: Option<&str>| Notice {
@@ -1048,7 +1478,7 @@ fn feed_announcements_and_alerts_show_until_dismissed() {
         alerts: vec![notice("x1", "Security update", Some("https://getartcraft.com/security"))],
     });
     let mut backend = Some(Fake { events: evs, sent, manage: true, pictures: Rc::default(), asked: Vec::new(), clock: Rc::new(Cell::new(NOW)) });
-    let mut h = Harness::builder().with_size(egui::vec2(1180.0, 1200.0)).build_ui_state(
+    let mut h = test_harness_builder(egui::Theme::Dark).with_size(egui::vec2(1180.0, 1200.0)).build_ui_state(
         move |ui, state: &mut Option<LauncherUi>| {
             if state.is_none()
                 && let Some(b) = backend.take()
@@ -1089,6 +1519,8 @@ fn automatic_checks_run_every_five_minutes() {
 }
 
 #[test]
+/// With auto-update on, outdated apps are queued for Install and the launcher for
+/// `UpdateLauncher`.
 fn automatic_updates_queue_installs_for_outdated_apps_and_launcher() {
     let mut ev = events();
     ev.push(Event::LauncherUpdate(release("artcraft-launcher", "0.2.0", NOW)));
@@ -1096,7 +1528,7 @@ fn automatic_updates_queue_installs_for_outdated_apps_and_launcher() {
     let sent2 = sent.clone();
     let mut backend =
         Some(Fake { events: ev, sent: sent2, manage: true, pictures: Rc::default(), asked: Vec::new(), clock: Rc::new(Cell::new(NOW)) });
-    let mut h = Harness::builder().with_size(egui::vec2(1180.0, 1200.0)).build_ui_state(
+    let mut h = test_harness_builder(egui::Theme::Dark).with_size(egui::vec2(1180.0, 1200.0)).build_ui_state(
         move |ui, state: &mut Option<LauncherUi>| {
             if state.is_none()
                 && let Some(b) = backend.take()
@@ -1117,6 +1549,7 @@ fn automatic_updates_queue_installs_for_outdated_apps_and_launcher() {
 }
 
 #[test]
+/// With auto-update off, no app install or launcher update is queued.
 fn automatic_updates_are_disabled_by_default() {
     let mut ev = events();
     ev.push(Event::LauncherUpdate(release("artcraft-launcher", "0.2.0", NOW)));
@@ -1124,7 +1557,7 @@ fn automatic_updates_are_disabled_by_default() {
     let sent2 = sent.clone();
     let mut backend =
         Some(Fake { events: ev, sent: sent2, manage: true, pictures: Rc::default(), asked: Vec::new(), clock: Rc::new(Cell::new(NOW)) });
-    let mut h = Harness::builder().with_size(egui::vec2(1180.0, 1200.0)).build_ui_state(
+    let mut h = test_harness_builder(egui::Theme::Dark).with_size(egui::vec2(1180.0, 1200.0)).build_ui_state(
         move |ui, state: &mut Option<LauncherUi>| {
             if state.is_none()
                 && let Some(b) = backend.take()
@@ -1145,13 +1578,15 @@ fn automatic_updates_are_disabled_by_default() {
 }
 
 #[test]
+/// The footer names the release origins actually in use, adding GitHub only when some release
+/// came from there.
 fn the_footer_names_the_services_behind_what_is_on_screen() {
     let footer = |extra: Vec<Event>| {
         let mut evs = events();
         evs.extend(extra);
         let sent = Rc::new(RefCell::new(Vec::new()));
         let mut backend = Some(Fake { events: evs, sent, manage: true, pictures: Rc::default(), asked: Vec::new(), clock: Rc::new(Cell::new(NOW)) });
-        let mut h = Harness::builder().with_size(egui::vec2(1180.0, 1200.0)).build_ui_state(
+        let mut h = test_harness_builder(egui::Theme::Dark).with_size(egui::vec2(1180.0, 1200.0)).build_ui_state(
             move |ui, state: &mut Option<LauncherUi>| {
                 if state.is_none()
                     && let Some(b) = backend.take()
@@ -1186,6 +1621,8 @@ fn web_build_offers_downloads() {
 }
 
 #[test]
+/// A custom title bar shows Minimize, Maximize and Close, and Close requests the viewport close
+/// command.
 fn custom_title_bar_has_window_buttons() {
     struct FramelessHost;
     impl Host for FramelessHost {
@@ -1201,7 +1638,7 @@ fn custom_title_bar_has_window_buttons() {
         asked: Vec::new(),
         clock: Rc::new(Cell::new(NOW)),
     });
-    let mut h = Harness::builder().with_size(egui::vec2(1180.0, 1200.0)).build_ui_state(
+    let mut h = test_harness_builder(egui::Theme::Dark).with_size(egui::vec2(1180.0, 1200.0)).build_ui_state(
         move |ui, state: &mut Option<LauncherUi>| {
             if state.is_none()
                 && let Some(b) = backend.take()
@@ -1223,6 +1660,47 @@ fn custom_title_bar_has_window_buttons() {
     h.step();
     let closes = h.output().viewport_output.values().any(|v| v.commands.contains(&egui::ViewportCommand::Close));
     assert!(closes, "the close button asks the window to close (the shell decides whether that hides it to the tray)");
+}
+
+/// Maximized, the window's top-right pixel is the screen's corner: there is no resize band there,
+/// so it belongs to the close button, as it does with Windows' own caption buttons (#374).
+#[test]
+fn maximized_the_close_button_reaches_the_screens_corner() {
+    let (mut h, _) = harness_with_title_bar(events(), ViewMode::Grid, egui::Theme::Dark, true, 1.0, artcraft_launcher_ui_egui::TitleBar::Custom);
+    h.run_steps(6);
+    let set_maximized = |h: &mut Harness<'_, Option<LauncherUi>>, maximized: bool| {
+        h.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().maximized = Some(maximized);
+        h.run_steps(2);
+    };
+    // Presses and releases at `pos`, and returns what the window was asked to do.
+    let click = |h: &mut Harness<'_, Option<LauncherUi>>, pos: egui::Pos2| -> Vec<egui::ViewportCommand> {
+        let mut asked = Vec::new();
+        for pressed in [true, false] {
+            let input = h.input_mut();
+            input.events.push(egui::Event::PointerMoved(pos));
+            input.events.push(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+            h.step();
+            asked.extend(h.output().viewport_output.values().flat_map(|v| v.commands.iter().cloned()));
+        }
+        asked
+    };
+    // Windowed, the clickable area stops short of the button's top-right corner by the resize
+    // band; maximized, it reaches it.
+    let windowed = h.get_by_label("Close").rect();
+    set_maximized(&mut h, true);
+    let maximized = h.get_by_label("Close").rect();
+    assert!(maximized.top() < windowed.top() && maximized.right() > windowed.right(), "windowed {windowed:?}, maximized {maximized:?}");
+    // The button's own corner stands in for the screen's: the harness keeps the app 8 px in from
+    // the window. Windowed, it is beyond the band and egui's click tolerance; maximized, it closes.
+    let corner = egui::pos2(maximized.right() - 0.5, maximized.top() + 0.5);
+    let asked = click(&mut h, corner);
+    assert!(asked.contains(&egui::ViewportCommand::Close), "maximized: {asked:?}");
+    set_maximized(&mut h, false);
+    let asked = click(&mut h, corner);
+    assert!(!asked.contains(&egui::ViewportCommand::Close), "windowed: {asked:?}");
+    // And the window's own corner is still for resizing.
+    let asked = click(&mut h, egui::pos2(1180.0 - 0.5, 0.5));
+    assert!(asked.iter().any(|c| matches!(c, egui::ViewportCommand::BeginResize(_))), "{asked:?}");
 }
 
 #[test]
@@ -1349,6 +1827,8 @@ fn the_bundled_lead_picture_is_available_without_a_network_reply() {
 }
 
 #[test]
+/// Enlarge adds a second, keyboard-navigable view over the drawer; Esc closes the enlarged
+/// picture before the drawer.
 fn the_lead_picture_can_be_enlarged() {
     let (mut h, _sent) = harness(ViewMode::Grid, egui::Theme::Dark, true);
     h.run_steps(8);
@@ -1358,6 +1838,7 @@ fn the_lead_picture_can_be_enlarged() {
     assert_eq!(h.query_all_by_label("Close (Esc)").count(), 0);
     h.get_by_label("Enlarge picture").click();
     h.run_steps(4);
+    h.check_accessibility();
     snapshot(&mut h, "details-zoom-dark");
     assert_eq!(h.query_all_by_label("Close (Esc)").count(), 1);
     // The keyboard flips through the pictures there too.
@@ -1454,6 +1935,8 @@ fn the_drawer_and_the_enlarged_picture_survive_any_window_size() {
 }
 
 #[test]
+/// At 720–1180 px the rate-limit notice stays readable and clear of the footer's checked time
+/// and eight right-side links.
 fn the_rate_limit_notice_never_runs_under_the_footer_links() {
     for width in [720.0, 960.0, 1180.0] {
         let mut evs = events();
@@ -1466,7 +1949,7 @@ fn the_rate_limit_notice_never_runs_under_the_footer_links() {
             asked: Vec::new(),
             clock: Rc::new(Cell::new(NOW)),
         });
-        let mut h = Harness::builder().with_size(egui::vec2(width, 900.0)).build_ui_state(
+        let mut h = test_harness_builder(egui::Theme::Dark).with_size(egui::vec2(width, 900.0)).build_ui_state(
             move |ui, state: &mut Option<LauncherUi>| {
                 if state.is_none()
                     && let Some(b) = backend.take()
@@ -1560,6 +2043,10 @@ fn saved_filters_are_migrated_on_ui_construction() {
     }
 }
 
+/// Checks that, at one window width, every header control stays inside the window and clear of
+/// the brand text, that a custom title bar's buttons are there and inside, and snapshots the
+/// three widths that matter visually.
+
 #[test]
 fn narrow_header_keeps_the_view_switch_clear_of_brand_text() {
     use artcraft_launcher_ui_egui::TitleBar;
@@ -1651,6 +2138,7 @@ fn turn_wheel(h: &mut Harness<'_, Option<LauncherUi>>, lines: f32) {
         delta: egui::vec2(0.0, -lines),
         phase: egui::TouchPhase::Move,
         modifiers: egui::Modifiers::NONE,
+        source: egui::MouseWheelSource::Wheel,
     };
     let mut raw = egui::RawInput { events: vec![wheel], ..Default::default() };
     if let Some(l) = h.state() {
@@ -1732,6 +2220,7 @@ fn with_animations_on_hovering_a_card_animates() {
 }
 
 #[test]
+/// Command-plus-wheel over the main UI raises the global zoom factor.
 fn control_wheel_zooms_the_main_ui() {
     let (mut h, _) = harness(ViewMode::Grid, egui::Theme::Dark, true);
     h.run_steps(4);
@@ -1741,6 +2230,7 @@ fn control_wheel_zooms_the_main_ui() {
         phase: egui::TouchPhase::Move,
         delta: egui::vec2(0.0, 100.0),
         modifiers: egui::Modifiers::COMMAND,
+        source: egui::MouseWheelSource::Unknown,
     });
     h.step();
     h.run_steps(2);
@@ -1748,13 +2238,23 @@ fn control_wheel_zooms_the_main_ui() {
 }
 
 #[test]
+/// With release notes open, keyboard and wheel zoom change only the notes text (reset works)
+/// while the global zoom stays put and the release heading appears once.
 fn changelog_shortcuts_zoom_only_the_notes_text() {
     let (mut h, _) = harness(ViewMode::Grid, egui::Theme::Dark, true);
     h.run_steps(4);
-    h.get_all_by_label("…").next().unwrap().click();
+    // The grid's default order is name A-Z, so pick the app explicitly: the first card is not
+    // Photozen, and the heading assertion below is about this release's own page.
+    h.get_by_label("More actions for Photozen").click();
     h.run_steps(2);
     h.get_by_label("Release notes").click();
     h.run_steps(4);
+    assert_eq!(
+        h.query_all_by_role_and_label(egui::accesskit::Role::Image, "Photozen 0.5.0").count(),
+        0,
+        "the Notes hero icon is decorative and must not repeat the release heading"
+    );
+    assert_eq!(h.query_all_by_role_and_label(egui::accesskit::Role::Label, "Photozen 0.5.0").count(), 1, "the release heading appears exactly once");
     let before = h.get_by_label("What's Changed").rect().height();
     let global = h.ctx.zoom_factor();
     h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Plus);
@@ -1770,6 +2270,7 @@ fn changelog_shortcuts_zoom_only_the_notes_text() {
         phase: egui::TouchPhase::Move,
         delta: egui::vec2(0.0, 100.0),
         modifiers: egui::Modifiers::COMMAND,
+        source: egui::MouseWheelSource::Unknown,
     });
     h.step();
     h.run_steps(2);

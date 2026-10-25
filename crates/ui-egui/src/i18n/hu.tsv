@@ -96,6 +96,8 @@
 	Updates always use the format an app was installed with.	A frissítések mindig az eredeti telepítés csomagformátumát használják.
 	Running in the background	Futtatás a háttérben
 	Keep running in the tray when the window is closed	Az ablak bezárásakor kerüljön a tálcára
+	Zendaya Launcher is still running	Az Zendaya Launcher továbbra is fut
+	It's in the tray: open it or quit it from the tray icon, or turn this off in the settings.	A tálcára került: az ikonjáról megnyitható vagy bezárható, vagy kapcsolja ki ezt a beállításokban.
 	Show the window on the current desktop	Ablak megjelenítése az aktuális asztalon
 	Start Zendaya Launcher when I log in	Zendaya Launcher indítása bejelentkezéskor
 	Community	Közösség
@@ -266,6 +268,7 @@ column	Released	Dátum
 # Contextual: the filter tab names a group (the status pill says "Installed")
 filter	Installed	Telepítve
 	App details	Alkalmazás részletei
+	More actions for {name}	További műveletek: {name}
 	Close (Esc)	Bezárás (Esc)
 	Features	Funkciók
 	Latest release	Legújabb kiadás

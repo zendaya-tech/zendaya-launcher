@@ -83,6 +83,8 @@
 	Updates always use the format an app was installed with.	Aktualizace vždy použijí formát, ve kterém byla aplikace nainstalována.
 	Running in the background	Běh na pozadí
 	Keep running in the tray when the window is closed	Po zavření okna ponechat spuštěné v oznamovací oblasti
+	Zendaya Launcher is still running	Zendaya Launcher stále běží
+	It's in the tray: open it or quit it from the tray icon, or turn this off in the settings.	Je v oznamovací oblasti: otevřete ho nebo ukončete přes ikonu v ní, nebo to vypněte v nastavení.
 	Show the window on the current desktop	Zobrazit okno na aktuální ploše
 	Start Zendaya Launcher when I log in	Spouštět Zendaya Launcher po přihlášení
 	Community	Komunita
@@ -242,6 +244,7 @@ column	Latest	Nejnovější
 column	Released	Vydáno
 filter	Installed	Nainstalováno
 	App details	Podrobnosti o aplikaci
+	More actions for {name}	Další akce pro {name}
 	Close (Esc)	Zavřít (Esc)
 	Features	Funkce
 	Latest release	Nejnovější verze

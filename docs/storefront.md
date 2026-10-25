@@ -15,3 +15,11 @@ The featured image is bundled so discovery and the first Photozen screenshot wor
 
 Navigation tests: `cargo test -p artcraft-launcher-ui-egui --test ui store_ -- --test-threads=1`.
 Set `ARTCRAFT_LAUNCHER_SNAPSHOTS` to an existing output directory to save rendered previews while running these tests.
+
+## Upstream synchronization
+
+The 0.8.1 integration includes upstream security fixes and the pinned egui 0.37
+migration while retaining Zendaya navigation, the Photozen-only catalog and full
+application detail pages. Shared `craft-update` is configured from this fork's
+launcher descriptor; release URLs remain under `zendaya-tech/zendaya-launcher`.
+Legacy binary IDs and installer names stay compatible with existing installations.

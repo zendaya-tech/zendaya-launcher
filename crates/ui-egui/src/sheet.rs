@@ -120,3 +120,16 @@ pub(crate) fn panel_with(ui: &mut Ui, title: &str, about: Option<&str>, body: im
     });
     ui.add_space(16.0);
 }
+
+/// [`panel`], but the body also receives the heading's id so its control can be named by that
+/// visible heading (egui 0.37's `Response::labelled_by`), without adding a second identical label.
+pub(crate) fn panel_with_heading(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui, egui::Id)) {
+    let t = Tokens::get(ui.ctx());
+    Frame::new().stroke(t.hairline()).inner_margin(theme::BOX_MARGIN).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        let heading = widgets::hud(ui, title, t.faint);
+        ui.add_space(8.0);
+        body(ui, heading.id);
+    });
+    ui.add_space(14.0);
+}
