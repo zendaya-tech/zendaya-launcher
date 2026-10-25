@@ -934,7 +934,7 @@ fn a_kept_update_names_its_version_and_an_up_to_date_app_is_not_downloaded_again
     let mut ev = store_events(true);
     ev.push(Event::ReadyToInstall { app: "photozen".into(), ready: true });
     let (mut h, _) = harness_with(ev, ViewMode::Table, egui::Theme::Dark, true, 1.0);
-    h.get_by_label_contains("More actions").click();
+    h.get_by_label("More actions for Photozen").click();
     h.run_steps(3);
     h.get_by_label("Reinstall");
     h.check_accessibility();
@@ -1121,10 +1121,17 @@ fn every_table_column_sorts_both_ways() {
         h.run_steps(3);
         assert_eq!(h.state().as_ref().unwrap().settings.sort, key);
         let first = h.state().as_ref().unwrap().settings.sort_descending;
+        let forward = order(&h);
         h.get_by_label(label).click();
         h.run_steps(3);
         assert_ne!(h.state().as_ref().unwrap().settings.sort_descending, first);
-        assert_eq!(order(&h), ["Photozen"]);
+        let expected = if key == SortKey::Released {
+            // Only Photozen has release metadata in this fixture; empty cells stay last.
+            forward
+        } else {
+            forward.into_iter().rev().collect()
+        };
+        assert_eq!(order(&h), expected);
     }
 }
 
@@ -1296,7 +1303,7 @@ fn hostile_release_asset_urls_never_reach_the_opener() {
     }
     let (mut h, _) = harness_with(ev, ViewMode::Grid, egui::Theme::Dark, false, 1.0);
     h.run_steps(8);
-    assert_eq!(h.query_all_by_label("Download for macOS").count(), SUITE.len(), "the cards must offer their asset downloads");
+    assert_eq!(h.query_all_by_label("Download for macOS").count(), 1, "the mocked macOS release must offer its asset download");
     let opened = all_opened(&mut h, "Download for macOS");
     assert!(!opened.iter().any(|url| url.as_str() == HOSTILE), "a hostile card asset URL reached the opener: {opened:?}");
 
@@ -1616,7 +1623,7 @@ fn web_build_offers_downloads() {
     let (mut h, _) = harness(ViewMode::Grid, egui::Theme::Dark, false);
     h.run_steps(8);
     snapshot(&mut h, "web-grid-dark");
-    assert!(h.query_all_by_label("Download for macOS").count() == SUITE.len());
+    assert!(h.query_all_by_label("Download for macOS").count() == 1);
     assert!(h.query_by_label("Install").is_none());
 }
 
@@ -2393,7 +2400,7 @@ fn opening_an_app_counts_and_frequently_used_puts_the_most_opened_first() {
     assert_eq!(h.state().as_ref().unwrap().settings.launches.get("photozen"), Some(&1));
     h.state_mut().as_mut().unwrap().settings.sort = artcraft_launcher_ui_egui::settings::SortKey::Frequent;
     h.run_steps(3);
-    assert_eq!(order(&h), ["Photozen"]);
+    assert_eq!(order(&h), ["Photozen", "Zendaya Cursor"]);
 }
 
 #[test]
@@ -2403,7 +2410,7 @@ fn app_pages_preserve_navigation_and_do_not_use_a_dismissible_modal() {
     h.run_steps(6);
     h.get_by_label("Back");
     assert!(h.query_by_label("Close (Esc)").is_none());
-    assert!(h.query_by_label("Next app").is_none());
+    assert!(h.query_by_label("Next app").is_some());
     h.get_by_label("Library").click();
     h.run_steps(4);
     h.get_by_label("Photozen details");
@@ -2519,4 +2526,36 @@ fn store_french_navigation() {
     h.get_by_label(discover).click();
     h.run_steps(5);
     snapshot(&mut h, "zendaya-fiche-photozen");
+}
+
+#[test]
+fn zendaya_cursor_has_a_windows_install_action_and_a_full_detail_page() {
+    let release = artcraft_launcher_core::release::parse_github_release(
+        include_str!("../../core/tests/fixtures/zendaya-cursor-v0.1.0.json"),
+        "zendaya-tech/zendaya-cursor",
+    )
+    .unwrap();
+    let events = vec![
+        Event::Latest { app: "zendaya-cursor".into(), latest: LatestRelease::Found(release), from: Origin::GitHub },
+        Event::Detected { app: "zendaya-cursor".into(), installed: None },
+    ];
+    let (mut h, _) = harness_full(
+        events,
+        ViewMode::Grid,
+        egui::Theme::Dark,
+        true,
+        1.0,
+        artcraft_launcher_ui_egui::TitleBar::Native,
+        Rc::default(),
+        Some(Platform { os: Os::Windows, arch: Arch::X64 }),
+        None,
+    );
+    h.get_by_label("Zendaya Cursor details").click();
+    h.run_steps(5);
+    h.get_by_label("Back");
+    h.get_by_label("Install");
+    h.get_by_label_contains("Windows 10 / 11");
+    h.get_by_label("Six original themes");
+    assert!(h.query_by_label("Coming soon").is_none());
+    snapshot(&mut h, "zendaya-cursor-launcher-detail");
 }

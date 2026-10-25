@@ -186,7 +186,7 @@ fn german_switches_persists_and_keeps_install_actions() {
     snapshot(&mut table, "table-de-light");
     let (mut web, _) = harness_language(ViewMode::Grid, egui::Theme::Dark, false, &restored.language);
     web.run_steps(6);
-    assert!(web.query_all_by_label("Für macOS herunterladen").count() == SUITE.len());
+    assert!(web.query_all_by_label("Für macOS herunterladen").count() == 1);
     for width in [720.0, 800.0, 1180.0] {
         web.set_size(egui::vec2(width, 900.0));
         web.run_steps(6);

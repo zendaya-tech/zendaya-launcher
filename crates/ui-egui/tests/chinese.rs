@@ -229,5 +229,5 @@ fn simplified_chinese_switches_persists_and_keeps_install_actions() {
     snapshot(&mut table, "table-zh-CN-light");
     let (mut web, _) = harness_language(ViewMode::Grid, egui::Theme::Dark, false, &restored.language);
     web.run_steps(6);
-    assert!(web.query_all_by_label("下载 macOS 版").count() == SUITE.len());
+    assert!(web.query_all_by_label("下载 macOS 版").count() == 1);
 }

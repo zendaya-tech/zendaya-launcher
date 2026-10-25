@@ -1,4 +1,4 @@
-//! The apps the launcher knows about: Zendaya's Photozen.
+//! The apps the launcher knows about: Photozen and Zendaya Cursor.
 //!
 //! The list is data so a later version can fetch it from an API; [`SUITE`] is the built-in copy.
 //!
@@ -44,9 +44,9 @@ impl CraftApp {
         format!("https://github.com/{}", self.repo)
     }
 
-    /// The app's page on getartcraft.com.
+    /// The app's public product page or Zendaya repository.
     pub fn website(&self) -> String {
-        format!("https://getartcraft.com/apps/{}", self.id)
+        if self.repo.starts_with("zendaya-tech/") { self.repo_url() } else { format!("https://getartcraft.com/apps/{}", self.id) }
     }
 
     /// Asset stems this app's releases may use, current first.
@@ -74,8 +74,8 @@ const fn app(
     CraftApp { id, name, tagline, color, ink_light, ink_dark, repo, former_ids: &[], former_names: &[], bundle_name: id }
 }
 
-/// The apps the launcher installs: Zendaya's Photozen only.
-pub const SUITE: [CraftApp; 1] = [PHOTOZEN];
+/// The applications published by Zendaya.
+pub const SUITE: [CraftApp; 2] = [PHOTOZEN, CURSOR];
 
 /// Photozen, Zendaya's image editor (a PhotoCraft fork). Its releases ship `photozen-<ver>-…`
 /// assets; older builds of the fork still carry PhotoCraft's `photocraft-…` names and
@@ -86,6 +86,15 @@ pub const PHOTOZEN: CraftApp = CraftApp {
     bundle_name: "photocraft",
     ..app("photozen", "Photozen", "Image editing", [[0x2f, 0x7b, 0xf5], [0x1a, 0x5b, 0xc4], [0x7f, 0xb0, 0xff]], "zendaya-tech/photocraft")
 };
+
+/// Windows cursor personalization, distributed as a portable ZIP.
+pub const CURSOR: CraftApp = app(
+    "zendaya-cursor",
+    "Zendaya Cursor",
+    "Cursor themes and desktop effects",
+    [[167, 139, 250], [109, 40, 217], [196, 181, 253]],
+    "zendaya-tech/zendaya-cursor",
+);
 
 /// ArtCraft's website.
 pub const WEBSITE_URL: &str = "https://getartcraft.com";
@@ -131,6 +140,7 @@ pub const LAUNCHER_ID: &str = "artcraft-launcher";
 /// draws it, and the Linux install puts it in the desktop menu.
 pub fn app_icon_png(id: &str) -> Option<&'static [u8]> {
     Some(match id {
+        "zendaya-cursor" => include_bytes!("../../../assets/app-icons/zendaya-cursor.png"),
         "photozen" | "photocraft" => include_bytes!("../../../assets/app-icons/photocraft.png"),
         "vectorcraft" => include_bytes!("../../../assets/app-icons/vectorcraft.png"),
         "filmcraft" => include_bytes!("../../../assets/app-icons/filmcraft.png"),
@@ -162,8 +172,12 @@ mod tests {
     }
 
     #[test]
-    fn the_suite_is_photozen_alone() {
-        assert_eq!(SUITE.len(), 1);
+    fn the_suite_contains_zendayas_published_apps() {
+        assert_eq!(SUITE.len(), 2);
+        let cursor = CraftApp::by_id("zendaya-cursor").unwrap();
+        assert_eq!(cursor.repo, "zendaya-tech/zendaya-cursor");
+        assert_eq!(cursor.name, "Zendaya Cursor");
+        assert_eq!(cursor.website(), "https://github.com/zendaya-tech/zendaya-cursor");
         let photozen = CraftApp::by_id("photozen").unwrap();
         assert_eq!(photozen.name, "Photozen");
         assert_eq!(photozen.repo, "zendaya-tech/photocraft");

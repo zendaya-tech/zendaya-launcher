@@ -1,0 +1,29 @@
+{
+  "tag_name": "v0.1.0",
+  "name": "Zendaya Cursor v0.1.0",
+  "html_url": "https://github.com/zendaya-tech/zendaya-cursor/releases/tag/v0.1.0",
+  "published_at": "2026-10-25T18:54:39Z",
+  "draft": false,
+  "prerelease": false,
+  "body": "Windows x64 executable and portable ZIP. Extract the ZIP, then run zendaya-cursor.exe. Restore Windows cursors with Ctrl+Alt+R or the Restore button. Verify downloads with SHA256SUMS.txt.",
+  "assets": [
+    {
+      "name": "SHA256SUMS.txt",
+      "size": 215,
+      "browser_download_url": "https://github.com/zendaya-tech/zendaya-cursor/releases/download/v0.1.0/SHA256SUMS.txt",
+      "digest": "sha256:cba427eb9cdc6b2a487e70aef25f69e4a586ae0fafb7c130530cbd3b4dab04c4"
+    },
+    {
+      "name": "zendaya-cursor-0.1.0-windows-x64-portable.zip",
+      "size": 6997141,
+      "browser_download_url": "https://github.com/zendaya-tech/zendaya-cursor/releases/download/v0.1.0/zendaya-cursor-0.1.0-windows-x64-portable.zip",
+      "digest": "sha256:b25b05baa4840f4609e5c33bd31aa335b1b0a0a15f01b4ac4b38ad6b1e768918"
+    },
+    {
+      "name": "zendaya-cursor-0.1.0-windows-x64.exe",
+      "size": 16925184,
+      "browser_download_url": "https://github.com/zendaya-tech/zendaya-cursor/releases/download/v0.1.0/zendaya-cursor-0.1.0-windows-x64.exe",
+      "digest": "sha256:db566e066b4bbf5b2eee8db9d3aa1fc64b7f359772e045b734c5701a2be07017"
+    }
+  ]
+}

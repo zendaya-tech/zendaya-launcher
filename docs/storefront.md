@@ -19,7 +19,11 @@ Set `ARTCRAFT_LAUNCHER_SNAPSHOTS` to an existing output directory to save render
 ## Upstream synchronization
 
 The 0.8.1 integration includes upstream security fixes and the pinned egui 0.37
-migration while retaining Zendaya navigation, the Photozen-only catalog and full
+migration while retaining Zendaya navigation, the Zendaya application catalog and full
 application detail pages. Shared `craft-update` is configured from this fork's
 launcher descriptor; release URLs remain under `zendaya-tech/zendaya-launcher`.
 Legacy binary IDs and installer names stay compatible with existing installations.
+
+Zendaya Cursor is included alongside Photozen. Its Windows x64 release is installed from the
+portable ZIP under `zendaya-tech/zendaya-cursor`, with SHA256 verification. Its detail page
+keeps Back navigation and its own Windows support information.

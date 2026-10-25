@@ -201,5 +201,5 @@ fn japanese_switches_persists_and_keeps_install_actions() {
     snapshot(&mut table, "table-ja-light");
     let (mut web, _) = harness_language(ViewMode::Grid, egui::Theme::Dark, false, &restored.language);
     web.run_steps(6);
-    assert!(web.query_all_by_label("macOS 版をダウンロード").count() == SUITE.len());
+    assert!(web.query_all_by_label("macOS 版をダウンロード").count() == 1);
 }

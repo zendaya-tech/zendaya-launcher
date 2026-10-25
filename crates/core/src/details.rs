@@ -141,29 +141,46 @@ pub fn screenshot_within_budget(bytes: &[u8]) -> bool {
 /// Where Photozen runs.
 const PLATFORMS: &str = "macOS, Windows, Linux, FreeBSD, web";
 
-pub const DETAILS: [AppDetails; 1] = [AppDetails {
-    id: "photozen",
-    pictures: "photocraft",
-    headline: "The image editor you already know how to use.",
-    about: "Layers, masks, adjustment layers, layer styles, type, vectors and brushes in a native app \
+pub const DETAILS: [AppDetails; 2] = [
+    AppDetails {
+        id: "photozen",
+        pictures: "photocraft",
+        headline: "The image editor you already know how to use.",
+        about: "Layers, masks, adjustment layers, layer styles, type, vectors and brushes in a native app \
             written in Rust. Open source, offline, and yours.\n\n\
             Photozen keeps the menus, shortcuts and panels your hands already know, so there is \
             nothing to relearn.",
-    features: &[
-        feature("Native GPU canvas", "No Electron and no web view: a fast native compositor."),
-        feature("Real layered files", "Opens and saves layered PSD and PSB documents."),
-        feature("Non-destructive editing", "Adjustment layers, live-preview filters, smart objects and layer styles."),
-        feature("On-device selection", "Subject and object selection and mask refinement run locally."),
-        feature("Serious color", "8-, 16- and 32-bit RGB, CMYK, Lab and Grayscale, with ICC color management and soft proofing."),
-    ],
-    shots: &[
-        shot("demo", "Curves and type layers"),
-        shot("adjustments", "Levels with a live histogram"),
-        shot("layer-styles", "Layer styles on live type"),
-        shot("masks", "Selections and masked adjustments"),
-    ],
-    platforms: PLATFORMS,
-}];
+        features: &[
+            feature("Native GPU canvas", "No Electron and no web view: a fast native compositor."),
+            feature("Real layered files", "Opens and saves layered PSD and PSB documents."),
+            feature("Non-destructive editing", "Adjustment layers, live-preview filters, smart objects and layer styles."),
+            feature("On-device selection", "Subject and object selection and mask refinement run locally."),
+            feature("Serious color", "8-, 16- and 32-bit RGB, CMYK, Lab and Grayscale, with ICC color management and soft proofing."),
+        ],
+        shots: &[
+            shot("demo", "Curves and type layers"),
+            shot("adjustments", "Levels with a live histogram"),
+            shot("layer-styles", "Layer styles on live type"),
+            shot("masks", "Selections and masked adjustments"),
+        ],
+        platforms: PLATFORMS,
+    },
+    AppDetails {
+        id: "zendaya-cursor",
+        pictures: "zendaya-cursor",
+        headline: "Your mouse. Your style.",
+        about: "Give your Windows desktop a personal touch with six original cursor themes. Adjust the color, size and shadow, then apply your theme to the desktop.\n\nImport your own transparent PNG, set its hotspot and export a standard Windows cursor. Restore the Windows cursor scheme with the Restore button or Ctrl+Alt+R.",
+        features: &[
+            feature("Six original themes", "Arrow, diamond, ring and crosshair designs with adjustable colors and sizes."),
+            feature("Desktop effects", "Motion trails, click rings, sparkles and halos on a transparent Windows layer."),
+            feature("Your own PNG cursor", "Import a PNG, set its click hotspot and export a standard .cur file."),
+            feature("Restore Windows anytime", "Use the Restore button or Ctrl+Alt+R. Normal application exit restores the Windows cursors too."),
+            feature("Native Rust application", "A native interface with Win32 cursor integration, with no browser shell."),
+        ],
+        shots: &[],
+        platforms: "Windows 10 / 11 (x64)",
+    },
+];
 
 impl AppDetails {
     /// Where the picture `key` of this app is published, or `None` if the page has no such picture.

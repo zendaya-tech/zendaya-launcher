@@ -1,6 +1,6 @@
 # AGENTS.md: guide for AI agents and contributors
 
-Zendaya Launcher installs, updates and launches **Photozen**, Zendaya's image editor.
+Zendaya Launcher installs, updates and launches **Photozen**, Zendaya's image editor, and **Zendaya Cursor**, its Windows cursor utility.
 It is written in **Rust only** (no JavaScript or TypeScript): the desktop app is native
 egui/eframe, and the web build is the same Rust compiled to WebAssembly (trunk + wasm-bindgen).
 **No Tauri, Electron or webview shells**, ever.
